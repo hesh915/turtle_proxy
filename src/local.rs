@@ -1,18 +1,13 @@
+use slog::{error, info, Logger};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::prelude::*;
 use tokio::sync::mpsc;
 use tokio::time::{delay_for, timeout, Duration};
-//use tokio::prelude::*;
-use slog::{error, info, Logger};
 
 #[derive(Debug)]
 enum MessageSession {
     NewSession,
     DelSession,
-}
-#[derive(Debug)]
-enum MessageTunnel {
-    TunnelConnected,
-    _TunnelDisconnected,
 }
 
 pub async fn start_local(
@@ -28,7 +23,6 @@ pub async fn start_local(
     );
 
     let (session_tx, mut session_rx) = mpsc::channel::<MessageSession>(100);
-    let (mut tunnel_tx, mut tunnel_rx) = mpsc::channel::<MessageTunnel>(100);
 
     //1. listen local port
     let logger = logger_.clone();
@@ -41,7 +35,14 @@ pub async fn start_local(
     };
     tokio::spawn(async move {
         loop {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let (mut socket, _) = match listener.accept().await {
+                Ok((t, s)) => (t, s),
+                Err(e) => {
+                    error!(logger, "accept error:{}", e);
+                    return;
+                }
+            };
+
             let mut tx = session_tx.clone();
             let logger = logger.clone();
             tokio::spawn(async move {
@@ -68,7 +69,7 @@ pub async fn start_local(
     tokio::spawn(async move {
         loop {
             let tunnel_server_addr = tunnel_server_addr.to_owned();
-            let _socket = match timeout(
+            let mut socket = match timeout(
                 Duration::from_secs(5),
                 TcpStream::connect(tunnel_server_addr),
             )
@@ -85,36 +86,36 @@ pub async fn start_local(
                     continue;
                 }
             };
+            info!(
+                logger,
+                "Connect remote server successful, tunnel is ok, connection:[{:?}]", socket
+            );
+            //TODO Read
 
+            let (mut reader, mut _writer) = socket.split();
+            let mut buffer = [0; 128];
 
-            let tmp = MessageTunnel::TunnelConnected;
-            tunnel_tx.send(tmp).await.unwrap();
-
-
-            //todo delete
             loop {
-                delay_for(Duration::from_secs(1)).await;
-                //println!("heart beat !");
-            }
-        }
-    });
+                tokio::select! {
+                    length = reader.read(&mut buffer[..])=>{
+                        match length{
+                            Ok(len)=>{
+                                let str1 = String::from_utf8_lossy(&buffer);
+                                info!(logger, "got data len = {:?}, msg = {:?}", len,str1);
+                                if len == 0{
+                                    //todo set state close
+                                    break;
+                                }
+                                //todo read data
 
-    //3. handle session msg
-    let logger = logger_.clone();
-    tokio::spawn(async move {
-        loop {
-            for msg in session_rx.recv().await {
-                info!(logger, "got session msg = {:?}", msg);
-            }
-        }
-    });
-
-    //4. handle tunnel msg
-    let logger = logger_.clone();
-    tokio::spawn(async move {
-        loop {
-            for msg in tunnel_rx.recv().await {
-                info!(logger, "got tunnel msg = {:?}", msg);
+                            }
+                            Err(e) => println!("{:?}", e),
+                        }
+                    },
+                    msg = session_rx.recv()=>{
+                        info!(logger, "got session msg = {:?}", msg);
+                    },
+                }
             }
         }
     });
