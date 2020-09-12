@@ -28,8 +28,8 @@ pub async fn start_local(
         tunnel_server_addr
     );
 
-    let (session_tx, mut session_rx) = mpsc::channel::<MessageSession>(100);
-    let (mut tunnel_tx, mut tunnel_rx) = mpsc::channel::<MessageTunnel>(100);
+    let (session_tx, session_rx) = mpsc::channel::<MessageSession>(100);
+    let (tunnel_tx, tunnel_rx) = mpsc::channel::<MessageTunnel>(100);
 
     //1. listen local port
     let logger = logger_.clone();
@@ -42,7 +42,7 @@ pub async fn start_local(
     };
     tokio::spawn(async move {
         loop {
-            let (mut socket, _) = match listener.accept().await {
+            let (socket, _) = match listener.accept().await {
                 Ok((t, s)) => (t, s),
                 Err(e) => {
                     error!(logger, "accept error:{}", e);
@@ -50,28 +50,24 @@ pub async fn start_local(
                 }
             };
 
-            let mut tx = session_tx.clone();
+            let tx = session_tx.clone();
             let logger = logger.clone();
             tokio::spawn(async move {
-                local_client(&logger, &mut socket, &mut tx).await.unwrap();
+                local_client(&logger, socket, tx).await.unwrap();
             });
         }
     });
 
     //2. connect tunnel to remote
     let logger = logger_.clone();
-    let tunnel_server_addr = tunnel_server_addr.to_owned();
+    let addr = tunnel_server_addr.to_owned();
     tokio::spawn(async move {
-        local_tunnel(&logger, &tunnel_server_addr, &mut tunnel_tx)
-            .await
-            .unwrap();
+        local_tunnel(&logger, &addr, tunnel_tx).await.unwrap();
     });
 
     let logger = logger_.clone();
     tokio::spawn(async move {
-        data_exchange(&logger, &mut session_rx, &mut tunnel_rx)
-            .await
-            .unwrap();
+        data_exchange(&logger, session_rx, tunnel_rx).await.unwrap();
     });
 
     Ok(())
@@ -79,8 +75,8 @@ pub async fn start_local(
 
 async fn local_client(
     logger: &Logger,
-    socket: &mut TcpStream,
-    session_tx: &mut mpsc::Sender<MessageSession>,
+    mut socket: TcpStream,
+    mut session_tx: mpsc::Sender<MessageSession>,
 ) -> std::io::Result<()> {
     info!(logger, "Client Connected, connection:[{:?}]", socket);
     //TODO Read
@@ -122,13 +118,12 @@ async fn local_client(
 async fn local_tunnel(
     logger: &Logger,
     tunnel_server_addr: &str,
-    tunnel_tx: &mut mpsc::Sender<MessageTunnel>,
+    mut tunnel_tx: mpsc::Sender<MessageTunnel>,
 ) -> std::io::Result<()> {
     loop {
-        let tunnel_server_addr = tunnel_server_addr.to_owned();
         let mut socket = match timeout(
             Duration::from_secs(5),
-            TcpStream::connect(tunnel_server_addr),
+            TcpStream::connect(tunnel_server_addr.to_owned()),
         )
         .await
         {
@@ -184,8 +179,8 @@ async fn local_tunnel(
 
 async fn data_exchange(
     logger: &Logger,
-    session_rx: &mut mpsc::Receiver<MessageSession>,
-    tunnel_rx: &mut mpsc::Receiver<MessageTunnel>,
+    mut session_rx: mpsc::Receiver<MessageSession>,
+    mut tunnel_rx: mpsc::Receiver<MessageTunnel>,
 ) -> std::io::Result<()> {
     loop {
         tokio::select! {
