@@ -53,19 +53,7 @@ pub async fn start_local(
             let mut tx = session_tx.clone();
             let logger = logger.clone();
             tokio::spawn(async move {
-                //process_tcp(tx1, socket).await;
-                info!(logger, "socket={:?}", socket);
-
-                let tmp = MessageSession::NewSession;
-                tx.send(tmp).await.unwrap();
-
-                let (mut reader, mut writer) = socket.split();
-                tokio::io::copy(&mut reader, &mut writer).await.unwrap();
-                //socket.read_to_end(buf);
-                //socket.read(buf)
-
-                let tmp = MessageSession::DelSession;
-                tx.send(tmp).await.unwrap();
+                local_client(&logger, &mut socket, &mut tx).await.unwrap();
             });
         }
     });
@@ -85,6 +73,48 @@ pub async fn start_local(
             .await
             .unwrap();
     });
+
+    Ok(())
+}
+
+async fn local_client(
+    logger: &Logger,
+    socket: &mut TcpStream,
+    session_tx: &mut mpsc::Sender<MessageSession>,
+) -> std::io::Result<()> {
+    info!(logger, "Client Connected, connection:[{:?}]", socket);
+    //TODO Read
+
+    let tmp = MessageSession::NewSession;
+    session_tx.send(tmp).await.unwrap();
+
+    let (mut reader, mut _writer) = socket.split();
+    let mut buffer = [0; 4096];
+
+    loop {
+        match reader.read(&mut buffer[..]).await {
+            Ok(len) => {
+                if len == 0 {
+                    //todo
+                    warn!(logger, "client connection is disconnect...");
+                    break;
+                }
+
+                info!(
+                    logger,
+                    "got data len = {:?}, msg = {:?}",
+                    len,
+                    String::from_utf8_lossy(&buffer[0..len])
+                );
+
+                //todo read data
+            }
+            Err(e) => println!("{:?}", e),
+        }
+    }
+
+    let tmp = MessageSession::DelSession;
+    session_tx.send(tmp).await.unwrap();
 
     Ok(())
 }
@@ -133,8 +163,13 @@ async fn local_tunnel(
                         warn!(logger, "tunnel connection is disconnect...");
                         break;
                     }
-                    
-                    info!(logger, "got data len = {:?}, msg = {:?}", len, String::from_utf8_lossy(&buffer[0..len]));
+
+                    info!(
+                        logger,
+                        "got data len = {:?}, msg = {:?}",
+                        len,
+                        String::from_utf8_lossy(&buffer[0..len])
+                    );
 
                     //todo read data
                 }
