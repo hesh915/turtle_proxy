@@ -1,8 +1,8 @@
 use slog::{error, info, warn, Logger};
+use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::prelude::*;
 use tokio::sync::mpsc;
-use tokio::time::{delay_for, timeout, Duration};
+use tokio::time::{sleep, timeout, Duration};
 
 #[derive(Debug)]
 enum MessageSession {
@@ -130,7 +130,7 @@ async fn local_tunnel(
             Ok(Ok(socket)) => socket,
             Ok(Err(e)) => {
                 error!(logger, "error connect:{}", e);
-                delay_for(Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(5)).await;
                 continue;
             }
             Err(e) => {
