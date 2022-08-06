@@ -33,13 +33,8 @@ pub async fn start_local(
 
     //1. listen local port
     let logger = logger_.clone();
-    let mut listener = match TcpListener::bind(local_listen_addr).await {
-        Ok(listener) => listener,
-        Err(e) => {
-            error!(logger, "listen bind:{}", e);
-            return Err(e);
-        }
-    };
+    let listener = TcpListener::bind(local_listen_addr).await?;
+
     tokio::spawn(async move {
         loop {
             let (socket, _) = match listener.accept().await {
@@ -76,7 +71,7 @@ pub async fn start_local(
 async fn local_client(
     logger: &Logger,
     mut socket: TcpStream,
-    mut session_tx: mpsc::Sender<MessageSession>,
+    session_tx: mpsc::Sender<MessageSession>,
 ) -> std::io::Result<()> {
     info!(logger, "Client Connected, connection:[{:?}]", socket);
     //TODO Read
@@ -118,7 +113,7 @@ async fn local_client(
 async fn local_tunnel(
     logger: &Logger,
     tunnel_server_addr: &str,
-    mut tunnel_tx: mpsc::Sender<MessageTunnel>,
+    tunnel_tx: mpsc::Sender<MessageTunnel>,
 ) -> std::io::Result<()> {
     loop {
         let mut socket = match timeout(
